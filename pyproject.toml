@@ -41,6 +41,10 @@ test = [
   "pytest>=8",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Keyan0412/dialogue_memory_pipeline"
+Repository = "https://github.com/Keyan0412/dialogue_memory_pipeline"
+
 [tool.setuptools]
 include-package-data = true
 

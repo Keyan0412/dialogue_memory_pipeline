@@ -37,7 +37,7 @@ The top-level entrypoint is `DialogueSegmentationPipeline`.
 Install the package from source:
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/Keyan0412/dialogue_memory_pipeline.git
 cd dialogue_memory_pipeline
 python -m venv .venv
 source .venv/bin/activate
