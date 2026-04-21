@@ -92,16 +92,28 @@ class EpisodeMemory:
     episode_id: str
     utterance_span: List[int]
     utterances: List[Utterance]
-    retrieval_summary: str
-    key_entities: List[str] = field(default_factory=list)
+    retrieval_summary_zh: str
+    retrieval_summary_en: str
+    key_entities_zh: List[str] = field(default_factory=list)
+    key_entities_en: List[str] = field(default_factory=list)
     importance: int = 1
+
+    @property
+    def retrieval_summary(self) -> str:
+        return self.retrieval_summary_en
+
+    @property
+    def key_entities(self) -> List[str]:
+        return self.key_entities_en
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "episode_id": self.episode_id,
             "utterance_span": self.utterance_span,
             "utterances": [asdict(u) for u in self.utterances],
-            "retrieval_summary": self.retrieval_summary,
-            "key_entities": self.key_entities,
+            "retrieval_summary_zh": self.retrieval_summary_zh,
+            "retrieval_summary_en": self.retrieval_summary_en,
+            "key_entities_zh": self.key_entities_zh,
+            "key_entities_en": self.key_entities_en,
             "importance": self.importance,
         }

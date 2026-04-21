@@ -25,7 +25,15 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the full dialogue memory pipeline demo.")
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT, help=f"Input dialogue JSON. Default: {DEFAULT_INPUT}")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help=f"Output JSON path. Default: {DEFAULT_OUTPUT}")
-    parser.add_argument("--model", default=os.getenv("OPENAI_MODEL", "qwen3.5-plus"), help="Model name for the OpenAI-compatible API.")
+    parser.add_argument("--model", default=os.getenv("OPENAI_MODEL", "qwen3.6-flash"), help="Model name for the OpenAI-compatible API.")
+    parser.add_argument("--local-state-chunk-size", type=int, default=0, help="Chunk size for local state extraction. 0 disables chunking.")
+    parser.add_argument("--local-state-max-parallel", type=int, default=1, help="Max parallel local-state chunk requests.")
+    parser.add_argument(
+        "--local-state-transport",
+        choices=["default", "bailian_batch_chat"],
+        default="default",
+        help="Transport for local state extraction. 'bailian_batch_chat' uses DashScope batch chat for chunk requests.",
+    )
     return parser.parse_args()
 
 
@@ -34,7 +42,11 @@ def main() -> None:
     args = parse_args()
 
     dialogue = load_dialogue(args.input)
-    config = PipelineConfig()
+    config = PipelineConfig(
+        local_state_chunk_size=args.local_state_chunk_size,
+        local_state_max_parallel=args.local_state_max_parallel,
+        local_state_transport=args.local_state_transport,
+    )
     pipeline = DialogueSegmentationPipeline.from_env(model=args.model, config=config)
     result = pipeline.run(dialogue)
 
@@ -48,7 +60,8 @@ def main() -> None:
     print("\n[demo] Episodic memories:")
     for ep in result["episodes"]:
         print(f"  {ep['episode_id']} | span={ep['utterance_span']}")
-        print(f"    summary: {ep['retrieval_summary']}")
+        print(f"    summary_zh: {ep['retrieval_summary_zh']}")
+        print(f"    summary_en: {ep['retrieval_summary_en']}")
 
     print(f"\n[demo] Saved full result to: {args.output}")
 

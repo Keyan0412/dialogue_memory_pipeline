@@ -5,7 +5,7 @@ import os
 import time
 from importlib.resources import files
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 
 from dialogue_memory_pipeline.clients.llm_client import JSONLLM, OpenAIJSONLLM
 from dialogue_memory_pipeline.config import PipelineConfig
@@ -22,12 +22,16 @@ class DialogueSegmentationPipeline:
         self,
         llm: JSONLLM,
         config: PipelineConfig | None = None,
+        candidate_llm: JSONLLM | None = None,
+        local_state_llm: JSONLLM | None = None,
+        transition_llm: JSONLLM | None = None,
+        memory_llm: JSONLLM | None = None,
     ) -> None:
         self.config = config or PipelineConfig()
-        self.candidate_generator = CandidateBoundaryGenerator(llm, self.config)
-        self.local_state_extractor = LLMStateExtractor(llm)
-        self.transition_judge = LLMTransitionJudge(llm, self.config)
-        self.memory_builder = LLMMemoryBuilder(llm)
+        self.candidate_generator = CandidateBoundaryGenerator(candidate_llm or llm, self.config)
+        self.local_state_extractor = LLMStateExtractor(local_state_llm or llm, self.config)
+        self.transition_judge = LLMTransitionJudge(transition_llm or llm, self.config)
+        self.memory_builder = LLMMemoryBuilder(memory_llm or llm)
 
     @classmethod
     def from_openai(
@@ -36,17 +40,68 @@ class DialogueSegmentationPipeline:
         api_key: str | None = None,
         base_url: str | None = None,
         config: PipelineConfig | None = None,
+        candidate_model: str | None = None,
+        local_state_model: str | None = None,
+        transition_model: str | None = None,
+        memory_model: str | None = None,
     ) -> "DialogueSegmentationPipeline":
         resolved_api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not resolved_api_key:
             raise RuntimeError("OPENAI_API_KEY is not set")
         resolved_base_url = base_url if base_url is not None else os.getenv("OPENAI_BASE_URL")
-        llm = OpenAIJSONLLM(
+        effective_config = config or PipelineConfig()
+
+        default_llm = OpenAIJSONLLM(
             api_key=resolved_api_key,
             model=model,
             base_url=resolved_base_url,
         )
-        return cls(llm=llm, config=config)
+        candidate_llm: JSONLLM | None = None
+        local_state_llm: JSONLLM | None = None
+        transition_llm: JSONLLM | None = None
+        memory_llm: JSONLLM | None = None
+
+        if candidate_model and candidate_model != model:
+            candidate_llm = OpenAIJSONLLM(
+                api_key=resolved_api_key,
+                model=candidate_model,
+                base_url=resolved_base_url,
+            )
+        if effective_config.local_state_transport == "bailian_batch_chat":
+            batch_base_url = _resolve_bailian_batch_base_url(resolved_base_url)
+            local_state_llm = OpenAIJSONLLM(
+                api_key=resolved_api_key,
+                model=local_state_model or model,
+                base_url=batch_base_url,
+                api_mode="chat_completions",
+                timeout=1800.0,
+            )
+        elif local_state_model and local_state_model != model:
+            local_state_llm = OpenAIJSONLLM(
+                api_key=resolved_api_key,
+                model=local_state_model,
+                base_url=resolved_base_url,
+            )
+        if transition_model and transition_model != model:
+            transition_llm = OpenAIJSONLLM(
+                api_key=resolved_api_key,
+                model=transition_model,
+                base_url=resolved_base_url,
+            )
+        if memory_model and memory_model != model:
+            memory_llm = OpenAIJSONLLM(
+                api_key=resolved_api_key,
+                model=memory_model,
+                base_url=resolved_base_url,
+            )
+        return cls(
+            llm=default_llm,
+            config=effective_config,
+            candidate_llm=candidate_llm,
+            local_state_llm=local_state_llm,
+            transition_llm=transition_llm,
+            memory_llm=memory_llm,
+        )
 
     @classmethod
     def from_env(
@@ -55,7 +110,18 @@ class DialogueSegmentationPipeline:
         config: PipelineConfig | None = None,
     ) -> "DialogueSegmentationPipeline":
         resolved_model = model or os.getenv("OPENAI_MODEL", "qwen3.5-plus")
-        return cls.from_openai(model=resolved_model, config=config)
+        candidate_model = os.getenv("OPENAI_MODEL_CANDIDATE", resolved_model)
+        local_state_model = os.getenv("OPENAI_MODEL_LOCAL_STATE", resolved_model)
+        transition_model = os.getenv("OPENAI_MODEL_TRANSITION", resolved_model)
+        memory_model = os.getenv("OPENAI_MODEL_MEMORY", resolved_model)
+        return cls.from_openai(
+            model=resolved_model,
+            config=config,
+            candidate_model=candidate_model,
+            local_state_model=local_state_model,
+            transition_model=transition_model,
+            memory_model=memory_model,
+        )
 
     def run(self, utterances: Sequence[Utterance]) -> Dict[str, object]:
         print("[pipeline] Starting pipeline run")
@@ -106,6 +172,39 @@ class DialogueSegmentationPipeline:
                 "memory_building_seconds": memory_building_seconds,
             },
         }
+
+    @staticmethod
+    def extract_memories(result: Dict[str, object], language: str | None = None) -> List[Dict[str, Any]]:
+        """Extract compact memory records from a pipeline result."""
+        episodes = result.get("episodes", [])
+        if not isinstance(episodes, list):
+            raise ValueError("result['episodes'] must be a list")
+
+        if language is None:
+            return [
+                {
+                    "utterance_span": episode["utterance_span"],
+                    "retrieval_summary_zh": episode["retrieval_summary_zh"],
+                    "retrieval_summary_en": episode["retrieval_summary_en"],
+                    "key_entities_zh": episode["key_entities_zh"],
+                    "key_entities_en": episode["key_entities_en"],
+                    "importance": episode["importance"],
+                }
+                for episode in episodes
+            ]
+
+        if language not in {"zh", "en"}:
+            raise ValueError("language must be 'zh', 'en', or None")
+
+        return [
+            {
+                "utterance_span": episode["utterance_span"],
+                "retrieval_summary": episode[f"retrieval_summary_{language}"],
+                "key_entities": episode[f"key_entities_{language}"],
+                "importance": episode["importance"],
+            }
+            for episode in episodes
+        ]
 
     def _segment(
         self,
@@ -255,3 +354,11 @@ def load_sample_dialogue() -> List[Utterance]:
     data_path = files("dialogue_memory_pipeline").joinpath("data", "sample_dialogue.json")
     items = json.loads(data_path.read_text(encoding="utf-8"))
     return [Utterance(turn_id=int(x["turn_id"]), speaker=x["speaker"], text=x["text"]) for x in items]
+
+
+def _resolve_bailian_batch_base_url(base_url: str | None) -> str:
+    if not base_url:
+        return "https://batch.dashscope.aliyuncs.com/compatible-mode/v1"
+    if "dashscope-intl.aliyuncs.com" in base_url:
+        return "https://batch.dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    return "https://batch.dashscope.aliyuncs.com/compatible-mode/v1"

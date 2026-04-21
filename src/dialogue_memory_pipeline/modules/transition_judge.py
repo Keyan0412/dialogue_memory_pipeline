@@ -6,6 +6,7 @@ from typing import Dict, List, Sequence
 from dialogue_memory_pipeline.clients.llm_client import JSONLLM
 from dialogue_memory_pipeline.config import PipelineConfig
 from dialogue_memory_pipeline.core.schemas import LocalState, SegmentState, TransitionDecision
+from dialogue_memory_pipeline.modules.state_extractor import compact_local_state_payload
 
 
 class BaseTransitionJudge(ABC):
@@ -36,7 +37,7 @@ class LLMTransitionJudge(BaseTransitionJudge):
         )
         user_prompt = (
             f"Left segment state: {left_state.to_dict()}\n"
-            f"Right local states: {[x.to_dict() for x in right_local_states]}\n"
+            f"Right local states: {[compact_local_state_payload(x) for x in right_local_states]}\n"
             f"Candidate features: {candidate_features}\n"
             "Decide whether the right side still fits the current stable topic and discourse goal, or opens a new topic."
         )

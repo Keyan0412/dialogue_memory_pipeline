@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -27,6 +28,11 @@ def main() -> None:
     OUTPUT_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"Saved result to {OUTPUT_PATH}")
+    print("Models:")
+    print(f"  candidate: {os.getenv('OPENAI_MODEL_CANDIDATE', os.getenv('OPENAI_MODEL', 'qwen3.5-plus'))}")
+    print(f"  local_state: {os.getenv('OPENAI_MODEL_LOCAL_STATE', os.getenv('OPENAI_MODEL', 'qwen3.5-plus'))}")
+    print(f"  transition: {os.getenv('OPENAI_MODEL_TRANSITION', os.getenv('OPENAI_MODEL', 'qwen3.5-plus'))}")
+    print(f"  memory: {os.getenv('OPENAI_MODEL_MEMORY', os.getenv('OPENAI_MODEL', 'qwen3.5-plus'))}")
     print("Segments:")
     for seg in result["segments"]:
         print(f"  {seg['segment_id']} -> {seg['utterance_span']}")

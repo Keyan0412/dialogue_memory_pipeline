@@ -26,7 +26,7 @@ Given a sequence of utterances, the pipeline runs four stages:
 1. Candidate boundary generation
    Scores every possible boundary between adjacent utterances and keeps only the highest-confidence candidates.
 2. Local state extraction
-   Extracts a structured state for each utterance, including topic, intent, entities, cue markers, and obligation signals.
+   Extracts a compact structured state for each utterance, centered on topic, intent, and obligation signals.
 3. Transition judgment and segmentation
    Walks candidate boundaries in order and decides whether each one starts a new segment.
 4. Episodic memory building
@@ -67,7 +67,11 @@ Supported environment variables:
 
 - `OPENAI_API_KEY`
 - `OPENAI_BASE_URL` (optional)
-- `OPENAI_MODEL` (optional when using `from_env`)
+- `OPENAI_MODEL` (default fallback for all stages)
+- `OPENAI_MODEL_CANDIDATE` (optional stage override)
+- `OPENAI_MODEL_LOCAL_STATE` (optional stage override)
+- `OPENAI_MODEL_TRANSITION` (optional stage override)
+- `OPENAI_MODEL_MEMORY` (optional stage override)
 
 Example `.env`:
 
@@ -75,7 +79,17 @@ Example `.env`:
 OPENAI_API_KEY=YOUR_API_KEY
 OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 OPENAI_MODEL=qwen3.5-plus
+OPENAI_MODEL_CANDIDATE=qwen3.5-plus
+OPENAI_MODEL_LOCAL_STATE=qwen3.5-flash
+OPENAI_MODEL_TRANSITION=qwen3.5-plus
+OPENAI_MODEL_MEMORY=qwen3.5-plus
 ```
+
+Stage model selection in `from_env()` uses this fallback order:
+
+- stage-specific env var, if set
+- `OPENAI_MODEL`
+- built-in default `qwen3.5-plus`
 
 At this stage, other OpenAI-compatible providers may or may not work, but they are not yet officially supported by this package.
 
@@ -97,13 +111,16 @@ config = PipelineConfig(
     min_candidate_score=0.20,
     right_preview_window=3,
     min_segment_len=2,
+    local_state_chunk_size=8,
+    local_state_max_parallel=4,
 )
 
 pipeline = DialogueSegmentationPipeline.from_env(config=config)
 result = pipeline.run(dialogue)
+memories = pipeline.extract_memories(result, language="en")
 
 print(result["segments"])
-print(result["episodes"])
+print(memories)
 ```
 
 ### Use the pipeline with explicit credentials
@@ -146,6 +163,7 @@ Constructors:
 Main method:
 
 - `run(utterances) -> dict`
+- `extract_memories(result, language=None) -> list`
 
 ### `PipelineConfig`
 
@@ -157,6 +175,9 @@ PipelineConfig(
     min_candidate_score=0.20,
     right_preview_window=3,
     min_segment_len=2,
+    local_state_chunk_size=0,
+    local_state_max_parallel=1,
+    local_state_transport="default",
 )
 ```
 
@@ -166,6 +187,9 @@ Field meanings:
 - `min_candidate_score`: Minimum boundary score to keep before the top-p cap is applied.
 - `right_preview_window`: Number of right-side local states shown to the transition judge when evaluating a candidate split.
 - `min_segment_len`: Minimum allowed segment length used during segmentation and cleanup merge.
+- `local_state_chunk_size`: Chunk size for local state extraction. `0` means send the whole dialogue in one request.
+- `local_state_max_parallel`: Maximum parallel chunk requests during local state extraction.
+- `local_state_transport`: Transport used by local state extraction. `default` uses the normal OpenAI-compatible endpoint; `bailian_batch_chat` switches local state requests to DashScope Batch Chat.
 
 ## Input Format
 
@@ -226,10 +250,10 @@ Each local state includes:
 - `speaker`
 - `summary_topic`
 - `intent`
-- `salient_entities`
-- `cue_markers`
 - `obligation.opens`
 - `obligation.resolves`
+
+`salient_entities` and `cue_markers` may be omitted or empty in compact extraction mode.
 
 ### `segments`
 
@@ -257,8 +281,10 @@ Each episodic memory record includes:
 - `episode_id`
 - `utterance_span`
 - `utterances`
-- `retrieval_summary`
-- `key_entities`
+- `retrieval_summary_zh`
+- `retrieval_summary_en`
+- `key_entities_zh`
+- `key_entities_en`
 - `importance`
 
 ## Running the Included Scripts

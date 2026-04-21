@@ -18,6 +18,8 @@ class OpenAIJSONLLM:
         api_key: str,
         model: str,
         base_url: Optional[str] = None,
+        api_mode: str = "responses",
+        timeout: Optional[float] = None,
     ) -> None:
         try:
             from openai import OpenAI
@@ -27,20 +29,36 @@ class OpenAIJSONLLM:
         kwargs: Dict[str, Any] = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
+        if timeout is not None:
+            kwargs["timeout"] = timeout
         self.client = OpenAI(**kwargs)
         self.model = model
+        self.api_mode = api_mode
 
     def complete_json(self, system_prompt: str, user_prompt: str) -> Any:
-        response = self.client.responses.create(
-            model=self.model,
-            input=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            text={"format": {"type": "json_object"}},
-            extra_body={"enable_thinking": False},
-        )
-        text = self._extract_response_text(response)
+        if self.api_mode == "chat_completions":
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={"type": "json_object"},
+                extra_body={"enable_thinking": False},
+            )
+            text = self._extract_chat_completion_text(response)
+        else:
+            response = self.client.responses.create(
+                model=self.model,
+                input=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                text={"format": {"type": "json_object"}},
+                extra_body={"enable_thinking": False},
+            )
+            text = self._extract_response_text(response)
+
         if not text:
             raise ValueError(
                 "Model returned no text content. Raw response:\n"
@@ -85,6 +103,28 @@ class OpenAIJSONLLM:
                             message_chunks.append(cleaned)
         preferred = message_chunks if message_chunks else chunks
         return "\n".join(preferred).strip()
+
+    def _extract_chat_completion_text(self, response: Any) -> str:
+        choices = getattr(response, "choices", None) or []
+        if not choices:
+            return ""
+        message = getattr(choices[0], "message", None)
+        if message is None:
+            return ""
+        content = getattr(message, "content", None)
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            chunks: List[str] = []
+            for item in content:
+                if isinstance(item, dict):
+                    text = item.get("text")
+                else:
+                    text = getattr(item, "text", None)
+                if isinstance(text, str) and text.strip():
+                    chunks.append(text.strip())
+            return "\n".join(chunks).strip()
+        return ""
 
     def _extract_json_string(self, text: str) -> str:
         """Normalize a text response into a JSON string.
