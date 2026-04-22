@@ -6,8 +6,8 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC = REPO_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
@@ -17,8 +17,8 @@ from dialogue_memory_pipeline.config import PipelineConfig
 from dialogue_memory_pipeline.pipeline import DialogueSegmentationPipeline, load_dialogue
 
 
-DEFAULT_INPUT = ROOT / "src" / "dialogue_memory_pipeline" / "data" / "sample_dialogue.json"
-DEFAULT_OUTPUT = ROOT / "outputs" / "demo_output.json"
+DEFAULT_INPUT = SRC / "dialogue_memory_pipeline" / "data" / "sample_dialogue.json"
+DEFAULT_OUTPUT = REPO_ROOT / "outputs" / "demo_output.json"
 
 
 def parse_args() -> argparse.Namespace:
@@ -48,7 +48,7 @@ def main() -> None:
         local_state_transport=args.local_state_transport,
     )
     pipeline = DialogueSegmentationPipeline.from_env(model=args.model, config=config)
-    result = pipeline.run(dialogue)
+    result = pipeline.run(dialogue, dialogue_id=args.input.stem)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

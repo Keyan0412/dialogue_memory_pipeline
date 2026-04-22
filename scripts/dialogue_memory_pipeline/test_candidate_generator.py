@@ -7,8 +7,8 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC = REPO_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
@@ -20,8 +20,8 @@ from dialogue_memory_pipeline.config import PipelineConfig
 from dialogue_memory_pipeline.modules.candidate_generator import CandidateBoundaryGenerator
 
 
-DEFAULT_INPUT = ROOT / "src" / "dialogue_memory_pipeline" / "data" / "sample_dialogue.json"
-DEFAULT_OUTPUT = ROOT / "outputs" / "candidate_generator_report.json"
+DEFAULT_INPUT = SRC / "dialogue_memory_pipeline" / "data" / "sample_dialogue.json"
+DEFAULT_OUTPUT = REPO_ROOT / "outputs" / "candidate_generator_report.json"
 
 
 def parse_args() -> argparse.Namespace:

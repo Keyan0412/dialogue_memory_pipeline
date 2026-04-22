@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -57,6 +58,57 @@ class RecordingLLM:
 
     def complete_json(self, system_prompt: str, user_prompt: str):
         return {}
+
+
+class CandidateLLM:
+    def complete_json(self, system_prompt: str, user_prompt: str):
+        return [{"boundary_after_turn": 0, "score": 0.95, "reasoning": "clear topic shift"}]
+
+
+class StateLLM:
+    def complete_json(self, system_prompt: str, user_prompt: str):
+        payload = json.loads(user_prompt)
+        return [
+            {
+                "turn_id": item["turn_id"],
+                "speaker": item["speaker"],
+                "summary_topic": "travel booking" if item["turn_id"] == 0 else "hotel booking",
+                "intent": "ask" if item["turn_id"] == 0 else "change_topic",
+                "salient_entities": ["flight"] if item["turn_id"] == 0 else ["hotel"],
+                "cue_markers": [],
+                "obligation": {"opens": ["provide booking details"] if item["turn_id"] == 0 else [], "resolves": []},
+            }
+            for item in payload
+        ]
+
+
+class TransitionLLM:
+    def complete_json(self, system_prompt: str, user_prompt: str):
+        return {
+            "transition": "shift_new_topic",
+            "confidence": 0.9,
+            "should_split": True,
+            "reasoning": {"signal": "topic change"},
+        }
+
+
+class MemoryLLM:
+    def complete_json(self, system_prompt: str, user_prompt: str):
+        if "hotel booking" in user_prompt:
+            return {
+                "retrieval_summary_zh": "转向预订酒店并确认房型偏好。",
+                "retrieval_summary_en": "Shifted to booking a hotel and confirming room preferences.",
+                "key_entities_zh": ["酒店预订", "房型偏好"],
+                "key_entities_en": ["hotel booking", "room preferences"],
+                "importance": 3,
+            }
+        return {
+            "retrieval_summary_zh": "先讨论航班改签与订单信息。",
+            "retrieval_summary_en": "Discussed flight rescheduling and booking details first.",
+            "key_entities_zh": ["航班改签", "订单信息"],
+            "key_entities_en": ["flight rescheduling", "booking details"],
+            "importance": 4,
+        }
 
 
 class PackageLayoutTests(unittest.TestCase):
@@ -171,17 +223,32 @@ class PackageLayoutTests(unittest.TestCase):
 
         self.assertEqual(len(episodes), 1)
         episode = episodes[0]
+        self.assertIsNone(episode.dialogue_id)
+        self.assertEqual(episode.segment_id, "seg_000")
+        self.assertEqual(episode.episode_index, 0)
+        self.assertEqual(episode.episode_count, 1)
+        self.assertEqual(episode.turn_start, 0)
+        self.assertEqual(episode.turn_end, 0)
+        self.assertEqual(episode.utterance_count, 1)
+        self.assertEqual(episode.relative_start, 0.0)
+        self.assertEqual(episode.relative_end, 1.0)
+        self.assertEqual(episode.stable_topic, "memory builder")
+        self.assertEqual(episode.discourse_goal, "update bilingual output")
+        self.assertEqual(episode.open_obligations, [])
         self.assertEqual(episode.retrieval_summary_zh, "围绕双语记忆输出更新了摘要与实体结构。")
         self.assertEqual(episode.retrieval_summary_en, "Updated the summary and entity structure for bilingual memory output.")
         self.assertEqual(episode.key_entities_zh, ["双语记忆", "摘要结构"])
         self.assertEqual(episode.key_entities_en, ["bilingual memory", "summary structure"])
         self.assertEqual(episode.retrieval_summary, episode.retrieval_summary_en)
         self.assertEqual(episode.key_entities, episode.key_entities_en)
+        self.assertGreaterEqual(episode.token_estimate, 1)
 
     def test_extract_memories_supports_bilingual_and_single_language_views(self) -> None:
         result = {
             "episodes": [
                 {
+                    "dialogue_id": None,
+                    "episode_id": "ep_000",
                     "utterance_span": [0, 2],
                     "retrieval_summary_zh": "讨论双语记忆抽取。",
                     "retrieval_summary_en": "Discussed bilingual memory extraction.",
@@ -196,6 +263,8 @@ class PackageLayoutTests(unittest.TestCase):
             DialogueSegmentationPipeline.extract_memories(result),
             [
                 {
+                    "dialogue_id": None,
+                    "episode_id": "ep_000",
                     "utterance_span": [0, 2],
                     "retrieval_summary_zh": "讨论双语记忆抽取。",
                     "retrieval_summary_en": "Discussed bilingual memory extraction.",
@@ -209,6 +278,8 @@ class PackageLayoutTests(unittest.TestCase):
             DialogueSegmentationPipeline.extract_memories(result, language="en"),
             [
                 {
+                    "dialogue_id": None,
+                    "episode_id": "ep_000",
                     "utterance_span": [0, 2],
                     "retrieval_summary": "Discussed bilingual memory extraction.",
                     "key_entities": ["bilingual memory", "extraction"],
@@ -220,6 +291,8 @@ class PackageLayoutTests(unittest.TestCase):
             DialogueSegmentationPipeline.extract_memories(result, language="zh"),
             [
                 {
+                    "dialogue_id": None,
+                    "episode_id": "ep_000",
                     "utterance_span": [0, 2],
                     "retrieval_summary": "讨论双语记忆抽取。",
                     "key_entities": ["双语记忆", "抽取"],
@@ -248,6 +321,55 @@ class PackageLayoutTests(unittest.TestCase):
             models,
             ["default-model", "candidate-model", "local-model", "transition-model", "memory-model"],
         )
+
+    def test_run_and_export_include_dialogue_metadata(self) -> None:
+        pipeline = DialogueSegmentationPipeline(
+            llm=FakeLLM({}),
+            config=PipelineConfig(top_p_candidates=1.0, min_candidate_score=0.0, min_segment_len=1),
+            candidate_llm=CandidateLLM(),
+            local_state_llm=StateLLM(),
+            transition_llm=TransitionLLM(),
+            memory_llm=MemoryLLM(),
+        )
+
+        result = pipeline.run(
+            [
+                Utterance(turn_id=0, speaker="user", text="I need to change my flight."),
+                Utterance(turn_id=1, speaker="assistant", text="Sure, what is your booking number?"),
+            ],
+            dialogue_id="dlg_test",
+        )
+
+        self.assertEqual(result["dialogue_id"], "dlg_test")
+        episodes = result["episodes"]
+        self.assertEqual(len(episodes), 2)
+        self.assertEqual(episodes[0]["dialogue_id"], "dlg_test")
+        self.assertEqual(episodes[0]["episode_id"], "dlg_test:ep_000")
+        self.assertEqual(episodes[1]["episode_id"], "dlg_test:ep_001")
+        self.assertEqual(episodes[0]["turn_start"], 0)
+        self.assertEqual(episodes[1]["turn_end"], 1)
+        self.assertEqual(episodes[0]["segment_id"], "seg_000")
+        self.assertEqual(episodes[1]["segment_id"], "seg_001")
+        self.assertEqual(episodes[0]["stable_topic"], "travel booking")
+        self.assertIn("provide booking details", episodes[0]["open_obligations"])
+        self.assertGreaterEqual(episodes[0]["token_estimate"], 1)
+
+        normalized = DialogueSegmentationPipeline.normalize_episode_records(result)
+        self.assertEqual(normalized[0]["dialogue_id"], "dlg_test")
+        self.assertEqual(normalized[0]["episode_id"], "dlg_test:ep_000")
+        self.assertEqual(normalized[1]["episode_count"], 2)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "episodes.jsonl"
+            row_count = DialogueSegmentationPipeline.export_episodes(result, output_path)
+            self.assertEqual(row_count, 2)
+            lines = output_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 2)
+            first_record = json.loads(lines[0])
+            self.assertEqual(first_record["dialogue_id"], "dlg_test")
+            self.assertEqual(first_record["episode_id"], "dlg_test:ep_000")
+            self.assertEqual(first_record["turn_start"], 0)
+            self.assertEqual(first_record["stable_topic"], "travel booking")
 
 
 if __name__ == "__main__":

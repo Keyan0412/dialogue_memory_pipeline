@@ -1,9 +1,0 @@
-__pycache__/
-*.py[cod]
-outputs/*
-!outputs/.gitkeep
-.env
-*.egg-info/
-build/
-dist/
-.idea/

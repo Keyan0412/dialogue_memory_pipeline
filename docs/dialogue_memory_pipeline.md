@@ -42,16 +42,24 @@ The top-level entrypoint is `DialogueSegmentationPipeline`.
 - Configurable candidate selection thresholding
 - Simple API for loading dialogues from JSON files
 
+## Monorepo Placement
+
+Within ChronoMem, this is now a subpackage rather than a standalone project.
+
+- package code: `src/dialogue_memory_pipeline/`
+- tests: `tests/dialogue_memory_pipeline/`
+- runnable scripts: `scripts/dialogue_memory_pipeline/`
+- examples: `examples/dialogue_memory_pipeline/`
+
 ## Installation
 
-Install the package from source:
+From the ChronoMem repository root:
 
 ```bash
-git clone https://github.com/Keyan0412/dialogue_memory_pipeline.git
-cd dialogue_memory_pipeline
 python -m venv .venv
 source .venv/bin/activate
-pip install .
+pip install openai python-dotenv pytest
+export PYTHONPATH=src
 ```
 
 Required dependencies:
@@ -116,7 +124,7 @@ config = PipelineConfig(
 )
 
 pipeline = DialogueSegmentationPipeline.from_env(config=config)
-result = pipeline.run(dialogue)
+result = pipeline.run(dialogue, dialogue_id="dlg_sample")
 memories = pipeline.extract_memories(result, language="en")
 
 print(result["segments"])
@@ -136,7 +144,7 @@ pipeline = DialogueSegmentationPipeline.from_openai(
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
 
-result = pipeline.run(dialogue)
+result = pipeline.run(dialogue, dialogue_id="dlg_sample")
 ```
 
 ## Public API
@@ -162,8 +170,10 @@ Constructors:
 
 Main method:
 
-- `run(utterances) -> dict`
+- `run(utterances, dialogue_id=None) -> dict`
 - `extract_memories(result, language=None) -> list`
+- `normalize_episode_records(result, dialogue_id=None) -> list`
+- `export_episodes(result, path, dialogue_id=None) -> int`
 
 ### `PipelineConfig`
 
@@ -222,6 +232,7 @@ Each item must contain:
 
 `pipeline.run(...)` returns a dictionary with these top-level keys:
 
+- `dialogue_id`
 - `candidates`
 - `local_states`
 - `decisions`
@@ -278,14 +289,39 @@ Each finalized segment includes:
 
 Each episodic memory record includes:
 
+- `dialogue_id`
 - `episode_id`
+- `segment_id`
+- `episode_index`
+- `episode_count`
 - `utterance_span`
+- `turn_start`
+- `turn_end`
+- `utterance_count`
+- `relative_start`
+- `relative_end`
+- `stable_topic`
+- `discourse_goal`
+- `open_obligations`
 - `utterances`
 - `retrieval_summary_zh`
 - `retrieval_summary_en`
 - `key_entities_zh`
 - `key_entities_en`
 - `importance`
+- `token_estimate`
+
+### Normalized episode export
+
+Use `DialogueSegmentationPipeline.export_episodes(...)` to write downstream-friendly JSONL:
+
+```python
+result = pipeline.run(dialogue, dialogue_id="dlg_sample")
+row_count = pipeline.export_episodes(result, "outputs/episodes.jsonl")
+print(row_count)
+```
+
+Each JSONL record contains a normalized retrieval-facing schema with stable dialogue/episode ids, turn span metadata, segment state, bilingual summaries, entities, and an approximate `token_estimate`.
 
 ## Running the Included Scripts
 
@@ -324,15 +360,15 @@ This writes a JSON report with:
 - `src/dialogue_memory_pipeline/modules/`
   Pipeline modules for boundary generation, state extraction, transition judgment, and memory building
 - `src/dialogue_memory_pipeline/data/`
-  Packaged sample dialogue data included in the wheel
-- `examples/`
+  Packaged sample dialogue data
+- `examples/dialogue_memory_pipeline/`
   Small usage examples
-- `scripts/`
+- `scripts/dialogue_memory_pipeline/`
   Runnable scripts for demos and module-level testing
-- `tests/`
-  Local test coverage for packaging and defensive parsing behavior
+- `tests/dialogue_memory_pipeline/`
+  Local test coverage for defensive parsing and export behavior
 - `outputs/`
-  Generated artifacts
+  Generated local artifacts
 
 ## Model and Provider Notes
 
