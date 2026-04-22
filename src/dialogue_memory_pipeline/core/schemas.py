@@ -90,13 +90,26 @@ class Segment:
 @dataclass
 class EpisodeMemory:
     episode_id: str
+    segment_id: str
+    episode_index: int
+    episode_count: int
     utterance_span: List[int]
+    turn_start: int
+    turn_end: int
+    utterance_count: int
+    relative_start: float
+    relative_end: float
     utterances: List[Utterance]
+    stable_topic: str
+    discourse_goal: str
     retrieval_summary_zh: str
     retrieval_summary_en: str
+    dialogue_id: Optional[str] = None
+    open_obligations: List[str] = field(default_factory=list)
     key_entities_zh: List[str] = field(default_factory=list)
     key_entities_en: List[str] = field(default_factory=list)
     importance: int = 1
+    token_estimate: int = 0
 
     @property
     def retrieval_summary(self) -> str:
@@ -108,12 +121,25 @@ class EpisodeMemory:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "dialogue_id": self.dialogue_id,
             "episode_id": self.episode_id,
+            "segment_id": self.segment_id,
+            "episode_index": self.episode_index,
+            "episode_count": self.episode_count,
             "utterance_span": self.utterance_span,
+            "turn_start": self.turn_start,
+            "turn_end": self.turn_end,
+            "utterance_count": self.utterance_count,
+            "relative_start": self.relative_start,
+            "relative_end": self.relative_end,
             "utterances": [asdict(u) for u in self.utterances],
+            "stable_topic": self.stable_topic,
+            "discourse_goal": self.discourse_goal,
+            "open_obligations": self.open_obligations,
             "retrieval_summary_zh": self.retrieval_summary_zh,
             "retrieval_summary_en": self.retrieval_summary_en,
             "key_entities_zh": self.key_entities_zh,
             "key_entities_en": self.key_entities_en,
             "importance": self.importance,
+            "token_estimate": self.token_estimate,
         }

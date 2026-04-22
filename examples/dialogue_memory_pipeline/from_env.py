@@ -5,8 +5,8 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC = REPO_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 
 from dialogue_memory_pipeline import DialogueSegmentationPipeline, load_sample_dialogue
 
-OUTPUT_PATH = ROOT / "outputs" / "example_from_env.json"
+OUTPUT_PATH = REPO_ROOT / "outputs" / "example_from_env.json"
 
 
 def main() -> None:
@@ -22,7 +22,7 @@ def main() -> None:
 
     dialogue = load_sample_dialogue()
     pipeline = DialogueSegmentationPipeline.from_env()
-    result = pipeline.run(dialogue)
+    result = pipeline.run(dialogue, dialogue_id="dlg_sample")
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

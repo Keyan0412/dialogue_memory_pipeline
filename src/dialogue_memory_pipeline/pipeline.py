@@ -123,9 +123,15 @@ class DialogueSegmentationPipeline:
             memory_model=memory_model,
         )
 
-    def run(self, utterances: Sequence[Utterance]) -> Dict[str, object]:
+    def run(
+        self,
+        utterances: Sequence[Utterance],
+        dialogue_id: str | None = None,
+    ) -> Dict[str, object]:
         print("[pipeline] Starting pipeline run")
         print(f"[pipeline] Input utterances: {len(utterances)}")
+        if dialogue_id:
+            print(f"[pipeline] Dialogue id: {dialogue_id}")
 
         print("[pipeline] Stage 1/4: selecting final candidate boundaries")
         started = time.perf_counter()
@@ -153,13 +159,14 @@ class DialogueSegmentationPipeline:
 
         print("[pipeline] Stage 4/4: building episodic memories")
         started = time.perf_counter()
-        episodes = self.memory_builder.build(segments)
+        episodes = self.memory_builder.build(segments, dialogue_id=dialogue_id)
         memory_building_seconds = time.perf_counter() - started
         print(f"[pipeline] Stage 4/4 done in {memory_building_seconds:.2f}s")
         print(f"[pipeline] Episodes built: {len(episodes)}")
         print("[pipeline] Pipeline run complete")
 
         return {
+            "dialogue_id": dialogue_id,
             "candidates": [c.to_dict() for c in candidates],
             "local_states": [ls.to_dict() for ls in local_states],
             "decisions": [x for x in decisions],
@@ -183,6 +190,8 @@ class DialogueSegmentationPipeline:
         if language is None:
             return [
                 {
+                    "dialogue_id": episode.get("dialogue_id"),
+                    "episode_id": episode["episode_id"],
                     "utterance_span": episode["utterance_span"],
                     "retrieval_summary_zh": episode["retrieval_summary_zh"],
                     "retrieval_summary_en": episode["retrieval_summary_en"],
@@ -198,6 +207,8 @@ class DialogueSegmentationPipeline:
 
         return [
             {
+                "dialogue_id": episode.get("dialogue_id"),
+                "episode_id": episode["episode_id"],
                 "utterance_span": episode["utterance_span"],
                 "retrieval_summary": episode[f"retrieval_summary_{language}"],
                 "key_entities": episode[f"key_entities_{language}"],
@@ -205,6 +216,74 @@ class DialogueSegmentationPipeline:
             }
             for episode in episodes
         ]
+
+    @staticmethod
+    def normalize_episode_records(
+        result: Dict[str, object],
+        dialogue_id: str | None = None,
+    ) -> List[Dict[str, Any]]:
+        """Return normalized episode export records suitable for downstream retrieval."""
+        episodes = result.get("episodes", [])
+        if not isinstance(episodes, list):
+            raise ValueError("result['episodes'] must be a list")
+
+        resolved_dialogue_id = dialogue_id if dialogue_id is not None else result.get("dialogue_id")
+        normalized: List[Dict[str, Any]] = []
+        for index, episode in enumerate(episodes):
+            if not isinstance(episode, dict):
+                raise ValueError("Each episode must be a dictionary")
+
+            turn_start = int(episode.get("turn_start", episode["utterance_span"][0]))
+            turn_end = int(episode.get("turn_end", episode["utterance_span"][-1]))
+            utterances = episode.get("utterances", [])
+            stable_topic = str(episode.get("stable_topic", ""))
+            discourse_goal = str(episode.get("discourse_goal", ""))
+            open_obligations = list(episode.get("open_obligations", []))
+            record_dialogue_id = episode.get("dialogue_id", resolved_dialogue_id)
+            episode_id = str(episode.get("episode_id", f"ep_{index:03d}"))
+            if record_dialogue_id and ":" not in episode_id:
+                episode_id = f"{record_dialogue_id}:{episode_id}"
+
+            normalized.append(
+                {
+                    "dialogue_id": record_dialogue_id,
+                    "episode_id": episode_id,
+                    "segment_id": episode.get("segment_id"),
+                    "episode_index": int(episode.get("episode_index", index)),
+                    "episode_count": int(episode.get("episode_count", len(episodes))),
+                    "turn_start": turn_start,
+                    "turn_end": turn_end,
+                    "utterance_count": int(episode.get("utterance_count", len(utterances))),
+                    "relative_start": float(episode.get("relative_start", 0.0)),
+                    "relative_end": float(episode.get("relative_end", 1.0)),
+                    "stable_topic": stable_topic,
+                    "discourse_goal": discourse_goal,
+                    "open_obligations": open_obligations,
+                    "retrieval_summary_zh": str(episode["retrieval_summary_zh"]),
+                    "retrieval_summary_en": str(episode["retrieval_summary_en"]),
+                    "key_entities_zh": list(episode.get("key_entities_zh", [])),
+                    "key_entities_en": list(episode.get("key_entities_en", [])),
+                    "importance": int(episode.get("importance", 1)),
+                    "token_estimate": int(episode.get("token_estimate", 0)),
+                }
+            )
+        return normalized
+
+    @staticmethod
+    def export_episodes(
+        result: Dict[str, object],
+        path: str | Path,
+        dialogue_id: str | None = None,
+    ) -> int:
+        """Write normalized episode records as JSONL and return the row count."""
+        records = DialogueSegmentationPipeline.normalize_episode_records(result, dialogue_id=dialogue_id)
+        output_path = Path(path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", encoding="utf-8") as handle:
+            for record in records:
+                handle.write(json.dumps(record, ensure_ascii=False))
+                handle.write("\n")
+        return len(records)
 
     def _segment(
         self,

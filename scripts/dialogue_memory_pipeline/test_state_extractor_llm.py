@@ -7,8 +7,8 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC = REPO_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
@@ -18,8 +18,8 @@ from dialogue_memory_pipeline.clients.llm_client import OpenAIJSONLLM
 from dialogue_memory_pipeline.core.schemas import Utterance
 from dialogue_memory_pipeline.modules.state_extractor import LLMStateExtractor
 
-DEFAULT_INPUT = ROOT / "src" / "dialogue_memory_pipeline" / "data" / "sample_dialogue.json"
-DEFAULT_OUTPUT = ROOT / "outputs" / "state_extractor_llm_output.json"
+DEFAULT_INPUT = SRC / "dialogue_memory_pipeline" / "data" / "sample_dialogue.json"
+DEFAULT_OUTPUT = REPO_ROOT / "outputs" / "state_extractor_llm_output.json"
 
 
 def parse_args() -> argparse.Namespace:
