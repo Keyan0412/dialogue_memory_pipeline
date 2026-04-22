@@ -21,7 +21,7 @@ def main() -> None:
     pipeline = DialogueSegmentationPipeline.from_env(model="qwen3.5-plus", config=config)
 
     # Load dialogues
-    dialogue_path = "/home/jan/repos/dialogue_memory_pipeline/src/dialogue_memory_pipeline/data/synthetic_recall_benchmark_dialogues_v2.json"
+    dialogue_path = "/home/jan/repos/dialogue_memory_pipeline/src/dialogue_memory_pipeline/data/sample_dialogue.json"
     with open(dialogue_path, "r", encoding="utf-8") as f:
         data = json.load(f)
     dialogues = data["dialogues"]
